@@ -374,17 +374,41 @@ func extractSpotifyIDFromArtistItem(item map[string]interface{}) string {
 }
 
 func extractSpotifyID(input string) string {
+	return extractSpotifyEntityID(input, "artist")
+}
+
+func extractSpotifyTrackID(input string) string {
+	return extractSpotifyEntityID(input, "track")
+}
+
+func extractSpotifyEntityID(input string, entityTypes ...string) string {
 	value := strings.TrimSpace(input)
 	if value == "" {
 		return ""
 	}
 
-	if strings.HasPrefix(value, "spotify:") {
+	allowedTypes := make(map[string]struct{}, len(entityTypes))
+	for _, entityType := range entityTypes {
+		normalized := strings.ToLower(strings.TrimSpace(entityType))
+		if normalized != "" {
+			allowedTypes[normalized] = struct{}{}
+		}
+	}
+
+	matchesType := func(entityType string) bool {
+		if len(allowedTypes) == 0 {
+			return true
+		}
+		_, ok := allowedTypes[strings.ToLower(strings.TrimSpace(entityType))]
+		return ok
+	}
+
+	if strings.HasPrefix(strings.ToLower(value), "spotify:") {
 		parts := strings.Split(value, ":")
 		if len(parts) >= 3 {
 			entityType := strings.TrimSpace(parts[len(parts)-2])
 			last := strings.TrimSpace(parts[len(parts)-1])
-			if strings.EqualFold(entityType, "artist") && isSpotifyID(last) {
+			if matchesType(entityType) && isSpotifyID(last) {
 				return last
 			}
 		}
@@ -392,9 +416,18 @@ func extractSpotifyID(input string) string {
 
 	if strings.Contains(strings.ToLower(value), "spotify.com/") {
 		lower := strings.ToLower(value)
-		marker := "/artist/"
-		idx := strings.Index(lower, marker)
-		if idx != -1 {
+		markers := []string{"/artist/", "/track/", "/album/", "/playlist/", "/episode/", "/show/"}
+		for _, marker := range markers {
+			idx := strings.Index(lower, marker)
+			if idx == -1 {
+				continue
+			}
+
+			entityType := strings.Trim(marker, "/")
+			if !matchesType(entityType) {
+				continue
+			}
+
 			candidate := value[idx+len(marker):]
 			if qIdx := strings.Index(candidate, "?"); qIdx != -1 {
 				candidate = candidate[:qIdx]
@@ -402,6 +435,7 @@ func extractSpotifyID(input string) string {
 			if slashIdx := strings.Index(candidate, "/"); slashIdx != -1 {
 				candidate = candidate[:slashIdx]
 			}
+
 			candidate = strings.TrimSpace(candidate)
 			if isSpotifyID(candidate) {
 				return candidate
@@ -959,10 +993,12 @@ func FilterAlbum(data map[string]interface{}, separator string) map[string]inter
 			trackArtistsString := strings.Join(trackArtistNames, separator)
 
 			trackURI := getString(track, "uri")
-			trackID := ""
-			if strings.Contains(trackURI, ":") {
-				parts := strings.Split(trackURI, ":")
-				trackID = parts[len(parts)-1]
+			trackID := getString(track, "id")
+			if trackID == "" {
+				trackID = extractSpotifyTrackID(trackURI)
+			}
+			if trackID == "" {
+				trackID = extractSpotifyTrackID(getString(track, "externalUrl"))
 			}
 
 			contentRating := getMap(track, "contentRating")
